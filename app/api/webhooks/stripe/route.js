@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 
 import { supabase } from '@/lib/supabase'
-
+import { getCustomerPhone } from '@/lib/stripe'
 import { sendRecoveryMessage }
 from '@/lib/whatsapp'
 
@@ -76,6 +76,8 @@ body
 .object
 .amount_due/100
 
+const stripeCustomerId = body.data.object.customer
+
 const founderSettings =
 await supabase
 .from('settings')
@@ -95,30 +97,27 @@ throw new Error(
 )
 
 }
+const customerPhone =
+await getCustomerPhone({
 
-const customer =
-await supabase
-.from('customers')
-.select('*')
-.eq(
-'founder_email',
-founderEmail
-)
-.eq(
-'customer_email',
-customerEmail
-)
-.single()
+stripeSecretKey:
+founderSettings
+.data
+.stripe_secret_key,
 
-if(
-!customer.data
-){
+customerId:
+stripeCustomerId
+
+})
+
+if(!customerPhone){
 
 throw new Error(
-'Customer phone missing'
+'Phone missing in Stripe metadata'
 )
 
 }
+
 
 const recoveryLink =
 `https://recoverypulse.app/update-payment?customer=${customerEmail}`
@@ -135,10 +134,7 @@ founderSettings
 .data
 .whatsapp_phone_number_id,
 
-customerPhone:
-customer
-.data
-.customer_phone,
+customerPhone,
 
 amount:
 amountDue,
