@@ -1,28 +1,29 @@
-import { supabase } from "@/lib/supabase";
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
 export async function POST(request) {
   try {
     const body = await request.json();
+
     const {
       userEmail,
-
       stripeWebhookSecret,
-
       stripeSecretKey,
-
       metaWhatsappToken,
-
-      whatsappPhoneNumberId,
+      whatsappPhoneNumberId
     } = body;
 
+    // Validate that the email exists to prevent blank records
     if (!userEmail) {
-      return NextResponse.json({ error: "Email is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: 'User email is required' },
+        { status: 400 }
+      );
     }
 
-    // Upsert means: if email exists, update it. If not, insert a new record.
-    const { data, error } = await supabase
-      .from("settings")
+    // Upsert into Supabase (Insert if new, Update if exists based on email)
+    const { error } = await supabase
+      .from('settings')
       .upsert(
         {
           user_email: userEmail,
@@ -30,18 +31,22 @@ export async function POST(request) {
           stripe_secret_key: stripeSecretKey,
           meta_whatsapp_token: metaWhatsappToken,
           whatsapp_phone_number_id: whatsappPhoneNumberId,
+          updated_at: new Date().toISOString(),
         },
-        { onConflict: "user_email" },
-      )
-      .select();
+        { onConflict: 'user_email' } // Ensures email remains unique per user
+      );
 
-    if (error) throw error;
+    if (error) {
+      throw new Error(error.message);
+    }
 
-    return NextResponse.json(
-      { message: "Settings saved successfully!", data },
-      { status: 200 },
-    );
+    return NextResponse.json({ success: true }, { status: 200 });
+
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('Error saving settings:', error);
+    return NextResponse.json(
+      { error: error.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
