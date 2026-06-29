@@ -21,7 +21,6 @@ export default function Dashboard() {
       }
       setUser(session.user);
 
-      // 1. Fetch User Tier
       const { data: profile } = await supabase
         .from('profiles')
         .select('subscription_tier')
@@ -31,17 +30,13 @@ export default function Dashboard() {
       const currentTier = profile?.subscription_tier?.toLowerCase() || 'basic';
       setTierInfo({ tier: currentTier, limit: TIER_LIMITS[currentTier] });
 
-      // 2. Fetch All Connected Businesses
       const { data: settingsData } = await supabase
         .from("settings")
         .select("*")
         .eq("user_email", session.user.email);
 
-      if (settingsData) {
-        setConfigs(settingsData);
-      }
+      if (settingsData) setConfigs(settingsData);
       
-      // 3. Fetch History Events
       const { data: eventData } = await supabase
         .from("payment_events")
         .select("*")
@@ -49,9 +44,7 @@ export default function Dashboard() {
         .order('created_at', { ascending: false })
         .limit(20);
         
-      if (eventData) {
-        setEvents(eventData);
-      }
+      if (eventData) setEvents(eventData);
 
       setLoading(false);
     };
@@ -63,27 +56,19 @@ export default function Dashboard() {
 
   return (
     <div className="py-12 px-4">
-      <div className="max-w-5xl mx-auto space-y-12">
+      <div className="max-w-6xl mx-auto space-y-12">
         
-        {/* --- Top Section: Businesses --- */}
         <section>
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Your Businesses</h1>
-              <p className="mt-2 text-sm text-slate-500">
-                Manage your connected Stripe accounts and WhatsApp configurations.
-              </p>
             </div>
-            
             <div className="text-right">
               <div className="text-sm font-medium text-slate-700 capitalize mb-2">
                 {tierInfo.tier} Plan ({configs.length}/{tierInfo.limit})
               </div>
               {configs.length < tierInfo.limit ? (
-                <Link 
-                  href="/dashboard/edit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-                >
+                <Link href="/dashboard/edit" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
                   + Add Business
                 </Link>
               ) : (
@@ -96,12 +81,8 @@ export default function Dashboard() {
 
           {configs.length === 0 ? (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-12 text-center">
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">No businesses connected</h3>
               <p className="text-slate-500 mb-6">Connect your first Stripe account to get started.</p>
-              <Link 
-                href="/dashboard/edit"
-                className="px-6 py-3 bg-[#635BFF] hover:bg-[#4B45D6] text-white font-semibold rounded-lg shadow-sm transition-colors inline-block"
-              >
+              <Link href="/dashboard/edit" className="px-6 py-3 bg-[#635BFF] text-white font-semibold rounded-lg shadow-sm">
                 Connect with Stripe
               </Link>
             </div>
@@ -110,8 +91,9 @@ export default function Dashboard() {
               {configs.map((config) => (
                 <div key={config.stripe_account_id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
                   <div className="flex items-center justify-between mb-4">
-                    <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded">
-                      {config.stripe_account_id}
+                    {/* Shows Business Name, falls back to Stripe ID if none exists */}
+                    <span className="text-lg font-semibold text-slate-800">
+                      {config.business_name || "Unnamed Business"}
                     </span>
                     <span className="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
@@ -120,18 +102,12 @@ export default function Dashboard() {
                   
                   <div className="space-y-3 mb-6 flex-grow">
                     <div>
-                      <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">WhatsApp ID</p>
-                      <p className="text-sm font-medium text-slate-700 truncate">
-                        {config.whatsapp_phone_number_id || "Not configured"}
-                      </p>
+                      <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Stripe ID</p>
+                      <p className="text-sm font-mono text-slate-600">{config.stripe_account_id}</p>
                     </div>
                   </div>
 
-                  {/* Fixed: Now explicitly an interactive link that routes to the edit page */}
-                  <Link 
-                    href="/dashboard/edit"
-                    className="text-sm font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center"
-                  >
+                  <Link href="/dashboard/edit" className="text-sm font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center">
                     Edit Configuration <span className="ml-1">→</span>
                   </Link>
                 </div>
@@ -140,23 +116,20 @@ export default function Dashboard() {
           )}
         </section>
 
-        {/* --- Bottom Section: Recovery History --- */}
         <section>
           <div className="mb-6">
             <h2 className="text-xl font-bold text-slate-900">Recovery History</h2>
-            <p className="mt-1 text-sm text-slate-500">Recent payment failures and WhatsApp message statuses.</p>
           </div>
           
           <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
             {events.length === 0 ? (
-              <div className="p-8 text-center text-slate-500 text-sm">
-                No recovery events recorded yet. Waiting for payment failures...
-              </div>
+              <div className="p-8 text-center text-slate-500 text-sm">No recovery events recorded yet.</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm whitespace-nowrap">
                   <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                     <tr>
+                      <th className="px-6 py-4">Business</th>
                       <th className="px-6 py-4">Customer Email</th>
                       <th className="px-6 py-4">Amount</th>
                       <th className="px-6 py-4">Status</th>
@@ -166,7 +139,8 @@ export default function Dashboard() {
                   <tbody className="divide-y divide-slate-100">
                     {events.map((evt) => (
                       <tr key={evt.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4 font-medium text-slate-900">{evt.customer_email}</td>
+                        <td className="px-6 py-4 font-medium text-slate-800">{evt.business_name || 'N/A'}</td>
+                        <td className="px-6 py-4 text-slate-600">{evt.customer_email}</td>
                         <td className="px-6 py-4 text-slate-600">${evt.amount_due?.toFixed(2)}</td>
                         <td className="px-6 py-4">
                           <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${

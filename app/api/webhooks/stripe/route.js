@@ -106,7 +106,6 @@ export async function POST(request) {
     
     console.log(`WhatsApp message sent successfully to ${customerPhone} for ${customerEmail}`)
     
-    // 7. Log Success Event (With Error Checking!)
     const { error: insertError } = await supabase
       .from('payment_events')
       .insert({
@@ -114,6 +113,7 @@ export async function POST(request) {
         founder_email: founderEmail,
         customer_email: customerEmail,
         amount_due: rawAmount,
+        business_name: companyName, // <--- ADD THIS EXACT LINE
         status: 'whatsapp_sent'
       })
 
