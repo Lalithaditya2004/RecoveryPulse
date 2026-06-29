@@ -1,132 +1,193 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
-  const [apps, setApps] = useState([]);
-  const [logs, setLogs] = useState([]);
+  const [configs, setConfigs] = useState([]);
+  const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [tierInfo, setTierInfo] = useState({ tier: 'basic', limit: 1 });
+
+  const TIER_LIMITS = { free: 1, basic: 1, pro: 10, premium: 50 };
 
   useEffect(() => {
-    const fetchUserAndData = async () => {
+    const fetchDashboardData = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (!session) {
         window.location.href = "/";
         return;
       }
-      
       setUser(session.user);
 
-      // Fetch their connected apps
-      const { data: appData } = await supabase
+      // 1. Fetch User Tier
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('subscription_tier')
+        .eq('user_email', session.user.email)
+        .maybeSingle();
+
+      const currentTier = profile?.subscription_tier?.toLowerCase() || 'basic';
+      setTierInfo({ tier: currentTier, limit: TIER_LIMITS[currentTier] });
+
+      // 2. Fetch All Connected Businesses
+      const { data: settingsData } = await supabase
         .from("settings")
         .select("*")
         .eq("user_email", session.user.email);
 
-      if (appData) setApps(appData);
-
-      // Fetch their recent recovery logs
-      const { data: logsData } = await supabase
+      if (settingsData) {
+        setConfigs(settingsData);
+      }
+      
+      // 3. Fetch History Events
+      const { data: eventData } = await supabase
         .from("payment_events")
         .select("*")
         .eq("founder_email", session.user.email)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (logsData) setLogs(logsData);
+        .order('created_at', { ascending: false })
+        .limit(20);
+        
+      if (eventData) {
+        setEvents(eventData);
+      }
 
       setLoading(false);
     };
 
-    fetchUserAndData();
+    fetchDashboardData();
   }, []);
 
-  if (loading) return <div className="p-12 text-center text-slate-500">Loading your workspace...</div>;
+  if (loading) return <div className="p-12 text-center text-slate-500">Loading dashboard...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-8">
-      <div className="max-w-5xl mx-auto space-y-8">
+    <div className="py-12 px-4">
+      <div className="max-w-5xl mx-auto space-y-12">
         
-        {/* Top Nav Bar */}
-        <div className="flex items-center justify-between border-b border-slate-200 pb-6">
-          <div className="flex items-center gap-3">
-             <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold">R⚡️</div>
-             <h1 className="text-xl font-bold text-slate-900">Dashboard</h1>
+        {/* --- Top Section: Businesses --- */}
+        <section>
+          <div className="flex items-center justify-between mb-8">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Your Businesses</h1>
+              <p className="mt-2 text-sm text-slate-500">
+                Manage your connected Stripe accounts and WhatsApp configurations.
+              </p>
+            </div>
+            
+            <div className="text-right">
+              <div className="text-sm font-medium text-slate-700 capitalize mb-2">
+                {tierInfo.tier} Plan ({configs.length}/{tierInfo.limit})
+              </div>
+              {configs.length < tierInfo.limit ? (
+                <Link 
+                  href="/dashboard/edit"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
+                >
+                  + Add Business
+                </Link>
+              ) : (
+                <Link href="/pricing" className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
+                  Upgrade to Add More
+                </Link>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-slate-600">{user?.email}</span>
-            <button 
-              onClick={() => supabase.auth.signOut().then(() => window.location.href = "/")}
-              className="text-sm text-slate-500 hover:text-rose-600 transition-colors"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
 
-        {/* Stats & Actions row */}
-        <div className="flex items-center justify-between">
-          <div className="bg-white px-6 py-4 rounded-xl border border-slate-200 shadow-sm">
-            <p className="text-sm text-slate-500 font-medium uppercase tracking-wider">Active Integrations</p>
-            <p className="text-3xl font-bold text-slate-900 mt-1">{apps.length}</p>
+          {configs.length === 0 ? (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-12 text-center">
+              <h3 className="text-lg font-semibold text-slate-900 mb-2">No businesses connected</h3>
+              <p className="text-slate-500 mb-6">Connect your first Stripe account to get started.</p>
+              <Link 
+                href="/dashboard/edit"
+                className="px-6 py-3 bg-[#635BFF] hover:bg-[#4B45D6] text-white font-semibold rounded-lg shadow-sm transition-colors inline-block"
+              >
+                Connect with Stripe
+              </Link>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {configs.map((config) => (
+                <div key={config.stripe_account_id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs font-mono bg-slate-100 text-slate-600 px-2 py-1 rounded">
+                      {config.stripe_account_id}
+                    </span>
+                    <span className="flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-3 mb-6 flex-grow">
+                    <div>
+                      <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">WhatsApp ID</p>
+                      <p className="text-sm font-medium text-slate-700 truncate">
+                        {config.whatsapp_phone_number_id || "Not configured"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Fixed: Now explicitly an interactive link that routes to the edit page */}
+                  <Link 
+                    href="/dashboard/edit"
+                    className="text-sm font-medium text-indigo-600 hover:text-indigo-700 inline-flex items-center"
+                  >
+                    Edit Configuration <span className="ml-1">→</span>
+                  </Link>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* --- Bottom Section: Recovery History --- */}
+        <section>
+          <div className="mb-6">
+            <h2 className="text-xl font-bold text-slate-900">Recovery History</h2>
+            <p className="mt-1 text-sm text-slate-500">Recent payment failures and WhatsApp message statuses.</p>
           </div>
           
-          <button 
-            onClick={() => window.location.href = "/dashboard/edit"}
-            className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-          >
-            {apps.length === 0 ? "+ Onboard Gateway" : "Edit Configuration"}
-          </button>
-        </div>
-
-        {/* Recovery Log Table */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-            <h2 className="text-sm font-semibold text-slate-700">Recent Recovery Activity</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-white text-slate-500 border-b border-slate-100">
-                <tr>
-                  <th className="px-6 py-3 font-medium">Customer Email</th>
-                  <th className="px-6 py-3 font-medium">Amount</th>
-                  <th className="px-6 py-3 font-medium">Status</th>
-                  <th className="px-6 py-3 font-medium">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {logs.length === 0 ? (
-                  <tr>
-                    <td colSpan="4" className="px-6 py-8 text-center text-slate-500">
-                      No failed payments caught yet. Once a payment fails on your connected account, it will appear here.
-                    </td>
-                  </tr>
-                ) : (
-                  logs.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4 text-slate-900 font-medium">{log.customer_email}</td>
-                      <td className="px-6 py-4 text-slate-600">{log.amount_due}</td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          log.status === 'whatsapp_sent' 
-                            ? 'bg-emerald-100 text-emerald-800' 
-                            : 'bg-rose-100 text-rose-800'
-                        }`}>
-                          {log.status === 'whatsapp_sent' ? 'Message Sent' : 'Failed'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-slate-500 text-xs">
-                        {new Date(log.created_at).toLocaleDateString()}
-                      </td>
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            {events.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-sm">
+                No recovery events recorded yet. Waiting for payment failures...
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4">Customer Email</th>
+                      <th className="px-6 py-4">Amount</th>
+                      <th className="px-6 py-4">Status</th>
+                      <th className="px-6 py-4">Date</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {events.map((evt) => (
+                      <tr key={evt.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4 font-medium text-slate-900">{evt.customer_email}</td>
+                        <td className="px-6 py-4 text-slate-600">${evt.amount_due?.toFixed(2)}</td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
+                            evt.status === 'whatsapp_sent' || evt.status === 'success'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            {evt.status === 'whatsapp_sent' ? 'Message Sent' : 'Failed'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-slate-500">
+                          {new Date(evt.created_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
-        </div>
+        </section>
 
       </div>
     </div>

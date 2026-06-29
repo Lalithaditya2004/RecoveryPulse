@@ -2,11 +2,22 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
+// Define the limits for your SaaS tiers
+const TIER_LIMITS = {
+  free: 1,
+  basic: 1,
+  pro: 10,
+  premium: 50
+};
+
 export default function EditConfig() {
   const [user, setUser] = useState(null);
   const [loadingPage, setLoadingPage] = useState(true);
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [status, setStatus] = useState({ type: "", message: "" });
+  
+  // NEW: State to hold the user's tier and business count
+  const [tierInfo, setTierInfo] = useState({ tier: 'basic', count: 0, limit: 1 });
   
   const [formData, setFormData] = useState({
     stripeAccountId: "",
@@ -33,6 +44,29 @@ export default function EditConfig() {
       }
       setUser(session.user);
       
+      // 1. Get the user's subscription tier
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('subscription_tier')
+        .eq('user_email', session.user.email)
+        .maybeSingle();
+
+      const userTier = profile?.subscription_tier?.toLowerCase() || 'basic';
+      const userLimit = TIER_LIMITS[userTier] || 1;
+
+      // 2. Count how many businesses they have connected
+      const { count: currentCount } = await supabase
+        .from('settings')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_email', session.user.email);
+
+      setTierInfo({
+        tier: userTier,
+        count: currentCount || 0,
+        limit: userLimit
+      });
+
+      // 3. Load the form data (Note: If they have multiple, you may want to load a specific one via URL ID later)
       const { data } = await supabase
         .from("settings")
         .select("*")
@@ -53,13 +87,19 @@ export default function EditConfig() {
   }, []);
 
   const handleStripeConnect = () => {
+    // THE BOUNCER: Block the connection if they hit their limit
+    if (tierInfo.count >= tierInfo.limit) {
+      setStatus({ 
+        type: "error", 
+        message: `Limit Reached: You can only connect ${tierInfo.limit} business(es) on the ${tierInfo.tier} plan. Please upgrade to add more.` 
+      });
+      return;
+    }
+
     const clientId = process.env.NEXT_PUBLIC_STRIPE_CLIENT_ID; 
     const redirectUri = `${window.location.origin}/api/auth/stripe/callback`;
-    
-    // NEW: Attach the user's email to the outgoing request
     const state = encodeURIComponent(user.email);
     
-    // Notice we added &state=${state} to the very end of this URL
     window.location.href = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${redirectUri}&state=${state}`;
   };
 
@@ -113,6 +153,17 @@ export default function EditConfig() {
           >
             ← Back
           </button>
+        </div>
+
+        {/* Plan Usage Indicator */}
+        <div className="mb-6 flex items-center justify-between bg-slate-100 p-4 rounded-lg border border-slate-200 text-sm">
+          <div>
+            <span className="font-semibold text-slate-700 capitalize">{tierInfo.tier} Plan</span>
+            <span className="text-slate-500 ml-2">({tierInfo.count} / {tierInfo.limit} Businesses)</span>
+          </div>
+          {tierInfo.count >= tierInfo.limit && (
+            <button className="text-indigo-600 font-semibold hover:text-indigo-700">Upgrade</button>
+          )}
         </div>
 
         {/* Stripe Connect Section */}

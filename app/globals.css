@@ -1,9 +1,5 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
 
 @theme inline {
   --color-background: var(--background);
@@ -19,8 +15,11 @@
   }
 }
 
+:root {
+  color-scheme: light only;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: #f8fafc !important; /* Forces slate-50 */
+  color: #0f172a !important; /* Forces slate-900 */
 }
