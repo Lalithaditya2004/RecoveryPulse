@@ -94,15 +94,14 @@ export async function POST(request) {
     console.log(`Preparing to send WhatsApp message to ${customerPhone} for ${customerEmail} regarding ${formattedAmount}`) 
 
     // 6. Fire the dynamic WhatsApp message
+    // 6. Fire the centralized WhatsApp message
     await sendRecoveryMessage({
-      token: founderSettings.meta_whatsapp_token,
-      phoneNumberId: founderSettings.whatsapp_phone_number_id,
       customerPhone,
       customerName,
-      companyName,      // Passing the dynamically fetched company name
+      companyName,      
       amount: formattedAmount,
-      recoveryLink      // Passing the real Stripe Hosted URL
-    })
+      recoveryLink,
+    });
     
     console.log(`WhatsApp message sent successfully to ${customerPhone} for ${customerEmail}`)
     

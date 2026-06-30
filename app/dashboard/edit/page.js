@@ -14,14 +14,12 @@ export default function EditConfig() {
   const [formData, setFormData] = useState({
     businessName: "",
     stripeAccountId: "",
-    metaWhatsappToken: "",
-    whatsappPhoneNumberId: "",
   });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("success") === "stripe_connected") {
-      setStatus({ type: "success", message: "Stripe connected successfully! Now add your WhatsApp keys." });
+      setStatus({ type: "success", message: "Stripe connected successfully!" });
     } else if (params.get("error")) {
       setStatus({ type: "error", message: "Stripe connection failed or was denied." });
     }
@@ -62,8 +60,6 @@ export default function EditConfig() {
         setFormData({
           businessName: data.business_name || "",
           stripeAccountId: data.stripe_account_id || "",
-          metaWhatsappToken: data.meta_whatsapp_token || "",
-          whatsappPhoneNumberId: data.whatsapp_phone_number_id || "",
         });
       }
       setLoadingPage(false);
@@ -88,11 +84,11 @@ export default function EditConfig() {
     window.location.href = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${redirectUri}&state=${state}`;
   };
 
-  const handleSaveMetaKeys = async (e) => {
+  const handleSaveName = async (e) => {
     e.preventDefault();
     
     if (!formData.stripeAccountId) {
-      setStatus({ type: "error", message: "You must connect Stripe before saving WhatsApp keys." });
+      setStatus({ type: "error", message: "You must connect Stripe before saving." });
       return;
     }
 
@@ -103,16 +99,14 @@ export default function EditConfig() {
       const { error } = await supabase
         .from('settings')
         .update({
-          business_name: formData.businessName, // Saves the custom name
-          meta_whatsapp_token: formData.metaWhatsappToken,
-          whatsapp_phone_number_id: formData.whatsappPhoneNumberId,
+          business_name: formData.businessName,
           updated_at: new Date().toISOString(),
         })
         .eq('stripe_account_id', formData.stripeAccountId);
 
       if (error) throw error;
 
-      setStatus({ type: "success", message: "Configuration saved!" });
+      setStatus({ type: "success", message: "Business saved!" });
       setTimeout(() => window.location.href = "/dashboard", 1500);
 
     } catch (err) {
@@ -122,16 +116,14 @@ export default function EditConfig() {
     }
   };
 
-  if (loadingPage) return <div className="p-12 text-center text-slate-500">Loading configuration...</div>;
+  if (loadingPage) return <div className="p-12 text-center text-slate-500">Loading...</div>;
 
   return (
     <div className="py-12 px-4">
       <div className="max-w-xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200/60 p-8">
         
         <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Configure Integration</h1>
-          </div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Add Business</h1>
           <button onClick={() => window.location.href = "/dashboard"} className="text-sm font-medium text-slate-500 hover:text-slate-900">
             ← Back
           </button>
@@ -144,24 +136,10 @@ export default function EditConfig() {
           </div>
         </div>
 
-        <div className="mb-8 p-6 rounded-xl border border-slate-200 bg-slate-50 flex flex-col items-center text-center">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-800 mb-2">Step 1: Payment Data</h2>
-          {formData.stripeAccountId ? (
-            <div className="flex items-center gap-2 text-emerald-700 bg-emerald-100 px-4 py-2 rounded-lg font-medium text-sm">
-              ✅ Stripe Connected <span className="font-mono text-xs opacity-75">({formData.stripeAccountId})</span>
-            </div>
-          ) : (
-            <button onClick={handleStripeConnect} className="px-6 py-3 bg-[#635BFF] hover:bg-[#4B45D6] text-white font-semibold rounded-lg shadow-sm transition-colors w-full">
-              Connect with Stripe
-            </button>
-          )}
-        </div>
-
-        <form onSubmit={handleSaveMetaKeys} className="space-y-6 border-t border-slate-100 pt-6">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-slate-800 mb-2 text-center">Step 2: Configuration</h2>
-          
+        {/* The unified form */}
+        <form onSubmit={handleSaveName} className="space-y-6">
           <div>
-            <label className="block text-sm font-semibold text-slate-700">Business Display Name</label>
+            <label className="block text-sm font-semibold text-slate-700">Internal Business Name</label>
             <input
               type="text"
               placeholder="e.g., Downtown Fitness"
@@ -171,36 +149,27 @@ export default function EditConfig() {
               onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
             />
           </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700">Meta Permanent Token</label>
-            <input
-              type="password"
-              required
-              className="mt-1.5 block w-full p-3 rounded-lg border border-slate-300 text-sm outline-none"
-              value={formData.metaWhatsappToken}
-              onChange={(e) => setFormData({ ...formData, metaWhatsappToken: e.target.value })}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-slate-700">Phone Number ID</label>
-            <input
-              type="text"
-              required
-              className="mt-1.5 block w-full p-3 rounded-lg border border-slate-300 text-sm outline-none"
-              value={formData.whatsappPhoneNumberId}
-              onChange={(e) => setFormData({ ...formData, whatsappPhoneNumberId: e.target.value })}
-            />
-          </div>
+
+          {!formData.stripeAccountId ? (
+            <button type="button" onClick={handleStripeConnect} className="px-6 py-3 bg-[#635BFF] hover:bg-[#4B45D6] text-white font-semibold rounded-lg shadow-sm transition-colors w-full">
+              Connect with Stripe
+            </button>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center justify-center gap-2 text-emerald-700 bg-emerald-100 px-4 py-3 rounded-lg font-medium text-sm border border-emerald-200">
+                ✅ Stripe Connected <span className="font-mono text-xs opacity-75">({formData.stripeAccountId})</span>
+              </div>
+              <button type="submit" disabled={loadingSubmit} className="w-full py-3.5 px-4 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors">
+                {loadingSubmit ? "Saving..." : "Save Business"}
+              </button>
+            </div>
+          )}
 
           {status.message && (
             <div className={`p-4 rounded-xl text-sm font-medium ${status.type === "success" ? "bg-emerald-50 text-emerald-800 border-emerald-200" : "bg-rose-50 text-rose-800 border-rose-200"}`}>
               {status.message}
             </div>
           )}
-
-          <button type="submit" disabled={loadingSubmit || !formData.stripeAccountId} className="w-full py-3.5 px-4 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 transition-colors">
-            {loadingSubmit ? "Saving..." : "Save Configuration"}
-          </button>
         </form>
 
       </div>
