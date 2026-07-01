@@ -181,24 +181,34 @@ export default function Dashboard() {
             <div className="max-h-[500px] overflow-y-auto pr-2 pb-4 -mr-2 custom-scrollbar">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {configs.map((config) => (
-                  <div key={config.stripe_account_id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-lg font-semibold text-slate-800 truncate pr-2">
-                        {config.business_name || "Unnamed Business"}
-                      </span>
-                      <span className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
-                      </span>
-                    </div>
-                    
-                    <div className="space-y-3 flex-grow">
-                      <div>
-                        <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Stripe ID</p>
-                        <p className="text-sm font-mono text-slate-600 truncate">{config.stripe_account_id}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+  <div key={config.stripe_account_id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col">
+    <div className="flex items-center justify-between mb-4">
+      <span className="text-lg font-semibold text-slate-800 truncate pr-2">
+        {config.business_name || "Unnamed Business"}
+      </span>
+      
+      {/* --- REPLACED: Dynamic Active/Inactive Badge --- */}
+      {tierInfo.isActive ? (
+        <span className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full border border-emerald-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active
+        </span>
+      ) : (
+        <span className="flex-shrink-0 flex items-center gap-1 text-xs font-medium text-slate-700 bg-slate-100 px-2 py-1 rounded-full border border-slate-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span> Inactive
+        </span>
+      )}
+      {/* --------------------------------------------- */}
+
+    </div>
+    
+    <div className="space-y-3 flex-grow">
+      <div>
+        <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Stripe ID</p>
+        <p className="text-sm font-mono text-slate-600 truncate">{config.stripe_account_id}</p>
+      </div>
+    </div>
+  </div>
+))}
               </div>
             </div>
           )}
