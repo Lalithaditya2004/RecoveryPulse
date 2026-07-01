@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
-const TIER_LIMITS = { free: 1, basic: 1, pro: 10, premium: 50 };
+const TIER_LIMITS = { basic: 7, pro: 20 };
 
 export default function EditConfig() {
   const [user, setUser] = useState(null);
