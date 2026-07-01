@@ -1,18 +1,27 @@
 import { NextResponse } from 'next/server'
-import { supabase } from '@/lib/supabase'
 import { getCustomerPhone } from '@/lib/stripe'
 import { sendRecoveryMessage } from '@/lib/whatsapp'
 import Stripe from 'stripe'
+import { createClient } from '@supabase/supabase-js'
 
 // Initialize Stripe to fetch the connected account's business name
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: '2023-10-16', 
 });
 
+// Initialize Supabase Admin client for secure backend operations (bypasses RLS safely)
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY 
+);
+
 export async function POST(request) {
-  // Declare these at the top scope so the catch block can use them to log failures
+  // Elevate these variables so the catch block can log them even if the process fails midway
   let stripeEventId = null;
   let founderEmail = null;
+  let customerEmail = null;
+  let rawAmount = null;
+  let companyName = null;
 
   try {
     const body = await request.json()
@@ -22,8 +31,7 @@ export async function POST(request) {
     console.log(`Received Stripe webhook for connected account: ${connectedAccountId}`)
     
     if (!connectedAccountId) {
-      console.log("No connected account ID found in the webhook payload. This event is from the platform account.")
-      // If there is no account ID, this event happened on your master platform account.
+      console.log("No connected account ID found. Ignored platform-level event.")
       return NextResponse.json(
         { received: true, note: 'Ignored platform-level event' },
         { status: 200 }
@@ -37,8 +45,8 @@ export async function POST(request) {
       return NextResponse.json({ received: true }, { status: 200 })
     }
 
-    // 2. Prevent Duplicates
-    const { data: duplicate } = await supabase
+    // 2. Prevent Duplicates (Using supabaseAdmin)
+    const { data: duplicate } = await supabaseAdmin
       .from('payment_events')
       .select('id')
       .eq('stripe_event_id', stripeEventId)
@@ -48,22 +56,20 @@ export async function POST(request) {
       return NextResponse.json({ duplicate: true }, { status: 200 })
     }
 
-    // 3. Extract Dynamic Payload Data
-    const customerEmail = body.data.object.customer_email
+    // 3. Extract Dynamic Payload Data (Populate elevated variables)
+    customerEmail = body.data.object.customer_email
     const customerName = body.data.object.customer_name || 'there'
     
-    // THE MAGIC LINK: Stripe's auto-generated payment recovery page
     const recoveryLink = body.data.object.hosted_invoice_url; 
     
-    // Format amount into a clean currency string (e.g., "100.00 USD")
-    const rawAmount = body.data.object.amount_due / 100
+    rawAmount = body.data.object.amount_due / 100
     const currency = body.data.object.currency?.toUpperCase() || ''
     const formattedAmount = `${rawAmount.toFixed(2)} ${currency}`.trim()
 
     const stripeCustomerId = body.data.object.customer
 
     // 4. Look up Client Settings using the Stripe Account ID
-    const { data: founderSettings, error: settingsError } = await supabase
+    const { data: founderSettings, error: settingsError } = await supabaseAdmin
       .from('settings')
       .select('*')
       .eq('stripe_account_id', connectedAccountId)
@@ -75,26 +81,53 @@ export async function POST(request) {
 
     founderEmail = founderSettings.user_email;
 
-    // Fetch the actual Business Name from Stripe Connect
-    const connectedAccountDetails = await stripe.accounts.retrieve(connectedAccountId);
-    const companyName = connectedAccountDetails.business_profile?.name || 'our company';
+    // 5. Check Subscription Status
+    const { data: founderProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('subscription_status')
+      .eq('user_email', founderEmail)
+      .single();
 
-    // 5. Get Phone Number using Stripe Connect Authorization
+    if (!founderProfile || founderProfile.subscription_status !== 'active') {
+      console.log(`User ${founderEmail} is not active. Ignoring payment failure.`);
+      return NextResponse.json(
+        { received: true, note: 'Subscription inactive, webhook ignored' }, 
+        { status: 200 }
+      );
+    }
+
+    // Fetch the actual Business Name
+    const connectedAccountDetails = await stripe.accounts.retrieve(connectedAccountId);
+    companyName = connectedAccountDetails.business_profile?.name || 'our company';
+
+    // 6. Get Phone Number using Stripe Connect Authorization
     let customerPhone = await getCustomerPhone({
       stripeAccountId: connectedAccountId,
       customerId: stripeCustomerId
     })
 
-    // TEMPORARY FALLBACK
+    // Graceful Failure: If no phone is found, log as failed and do not retry
     if (!customerPhone) {
-      console.log("No phone found in Stripe, using fallback for testing...");
-      customerPhone = "918639610590"; 
+      console.log(`No phone number found for ${customerEmail}. Marking event as failed.`);
+      
+      await supabaseAdmin
+        .from('payment_events')
+        .insert({
+          stripe_event_id: stripeEventId,
+          founder_email: founderEmail,
+          customer_email: customerEmail,
+          amount_due: rawAmount,
+          business_name: companyName,
+          status: 'failed' 
+        });
+
+      // Return 200 so Stripe knows we handled it and doesn't retry
+      return NextResponse.json({ success: true, note: 'No phone number, logged as failed' }, { status: 200 });
     }
 
-    console.log(`Preparing to send WhatsApp message to ${customerPhone} for ${customerEmail} regarding ${formattedAmount}`) 
+    console.log(`Preparing to send WhatsApp to ${customerPhone} for ${customerEmail}`) 
 
-    // 6. Fire the dynamic WhatsApp message
-    // 6. Fire the centralized WhatsApp message
+    // 7. Fire the centralized WhatsApp message
     await sendRecoveryMessage({
       customerPhone,
       customerName,
@@ -103,43 +136,43 @@ export async function POST(request) {
       recoveryLink,
     });
     
-    console.log(`WhatsApp message sent successfully to ${customerPhone} for ${customerEmail}`)
+    console.log(`WhatsApp message sent successfully to ${customerPhone}`)
     
-    const { error: insertError } = await supabase
+    // 8. Log Success Event
+    const { error: insertError } = await supabaseAdmin
       .from('payment_events')
       .insert({
         stripe_event_id: stripeEventId,
         founder_email: founderEmail,
         customer_email: customerEmail,
         amount_due: rawAmount,
-        business_name: companyName, // <--- ADD THIS EXACT LINE
+        business_name: companyName,
         status: 'whatsapp_sent'
       })
 
-    // Explicitly check for an error and throw it so the catch block handles it
     if (insertError) {
       console.error("Supabase Insert Error:", insertError);
       throw new Error(`Database insert failed: ${insertError.message}`);
     }
-
-    console.log(`Logged successful event for Stripe Event ID: ${stripeEventId}, Founder Email: ${founderEmail} Customer Email: ${customerEmail}, Amount Due: ${formattedAmount}`)
 
     return NextResponse.json({ success: true }, { status: 200 })
 
   } catch(error) {
     console.error("Webhook processing error:", error)
 
-    // Safely log the failure only if we managed to extract the Stripe Event ID
+    // Graceful Failure: Log whatever context we managed to collect before the crash
     if (stripeEventId) {
-      const { error: upsertError } = await supabase
+      const { error: upsertError } = await supabaseAdmin
         .from('payment_events')
         .upsert({
           stripe_event_id: stripeEventId,
-          founder_email: founderEmail, // Will be null if it crashed before fetching settings
+          founder_email: founderEmail || null,
+          customer_email: customerEmail || 'Unknown',
+          amount_due: rawAmount || 0,
+          business_name: companyName || 'Unknown',
           status: 'failed'
         }, { onConflict: 'stripe_event_id' })
         
-      // Catch errors in the failure logger too
       if (upsertError) {
         console.error("CRITICAL: Could not even log the failure to Supabase:", upsertError);
       }
