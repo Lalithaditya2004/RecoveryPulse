@@ -24,10 +24,25 @@ export async function POST(request) {
   let companyName = null;
 
   try {
-    const body = await request.json()
+    const body = await request.text(); // Get raw body as text
+    const sig = request.headers.get('stripe-signature');
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    let event;
+
+    try {
+      // Verify webhook signature
+      event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
+    } catch (err) {
+      console.error(`Webhook signature verification failed: ${err.message}`);
+      return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
+    }
+
+    // Now safely parse the JSON
+    const parsedBody = JSON.parse(body);
 
     // 1. Identify the Connected Account via Stripe Connect payload
-    const connectedAccountId = body.account
+    const connectedAccountId = parsedBody.account
     console.log(`Received Stripe webhook for connected account: ${connectedAccountId}`)
     
     if (!connectedAccountId) {
