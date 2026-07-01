@@ -21,6 +21,19 @@ export default function Dashboard() {
 
   // New Pricing Limits (No Free Tier)
   const TIER_LIMITS = { basic: 7, pro: 20 };
+  const handleAddBusiness = () => {
+    if (configs.length >= tierInfo.limit) {
+      alert(`Limit Reached: You can only connect ${tierInfo.limit} business(es) on the ${tierInfo.tier} plan.`);
+      return;
+    }
+
+    const clientId = process.env.NEXT_PUBLIC_STRIPE_CLIENT_ID; 
+    const redirectUri = `${window.location.origin}/api/auth/stripe/callback`;
+    const state = encodeURIComponent(user.email);
+    
+    // Send them directly to Stripe
+    window.location.href = `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${clientId}&scope=read_write&redirect_uri=${redirectUri}&state=${state}`;
+  };
 
   const fetchHistoryEvents = async (userEmail, currentPage) => {
     const thirtyDaysAgo = new Date();
@@ -192,24 +205,18 @@ export default function Dashboard() {
 
               {/* Dynamic Button Logic based on Subscription */}
               {!tierInfo.isActive ? (
-                <Link
-                  href="/pricing"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm"
-                >
+                <Link href="/pricing" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm">
                   Subscribe to Add Business
                 </Link>
               ) : configs.length < tierInfo.limit ? (
-                <Link
-                  href="/dashboard/edit"
+                <button 
+                  onClick={handleAddBusiness} 
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
                 >
                   + Add Business
-                </Link>
+                </button>
               ) : (
-                <Link
-                  href="/pricing"
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors"
-                >
+                <Link href="/pricing" className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-lg shadow-sm transition-colors">
                   Upgrade to Add More
                 </Link>
               )}

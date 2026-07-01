@@ -1,61 +1,66 @@
 import { NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
 import Stripe from 'stripe';
+import { createClient } from '@supabase/supabase-js';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+  apiVersion: '2026-05-27.dahlia',
+});
+
+// Initialize Admin client to safely write to the database
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 export async function GET(request) {
+  const { searchParams } = new URL(request.url);
+  const code = searchParams.get('code');
+  const state = searchParams.get('state'); // We passed the user's email in the state
+  const error = searchParams.get('error');
+
+  // If the user clicked "Cancel" on the Stripe page
+  if (error) {
+    return NextResponse.redirect(new URL('/dashboard?error=stripe_denied', request.url));
+  }
+
+  if (!code || !state) {
+    return NextResponse.redirect(new URL('/dashboard?error=missing_params', request.url));
+  }
+
+  const userEmail = decodeURIComponent(state);
+
   try {
-    const { searchParams } = new URL(request.url);
-    const code = searchParams.get('code');
-    const error = searchParams.get('error');
-    
-    // NEW: Stripe hands the user's email back to us via the state parameter
-    const userEmail = searchParams.get('state'); 
-
-    // If the user clicked "Deny" on the Stripe page
-    if (error) {
-      return NextResponse.redirect(new URL('/dashboard/edit?error=stripe_denied', request.url));
-    }
-
-    if (!code) {
-      return NextResponse.json({ error: 'No authorization code provided' }, { status: 400 });
-    }
-
-    if (!userEmail) {
-      // Fixed the redirect typo here: sending them to '/' instead of '/login'
-      return NextResponse.redirect(new URL('/?error=session_lost', request.url));
-    }
-
-    // Exchange the temporary code for the permanent Stripe Account ID
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: '2023-10-16',
-    });
-
+    // 1. Exchange the code for the Connected Account ID
     const response = await stripe.oauth.token({
       grant_type: 'authorization_code',
       code,
     });
+    
+    const stripeAccountId = response.stripe_user_id;
 
-    const stripeAccountId = response.stripe_user_id; // Looks like 'acct_1QXXXXX'
+    // 2. Fetch the actual business name directly from Stripe
+    const accountDetails = await stripe.accounts.retrieve(stripeAccountId);
+    const businessName = accountDetails.business_profile?.name || 'Unnamed Business';
 
-    // Upsert this into Supabase using the email Stripe handed us
-    const { error: dbError } = await supabase
+    // 3. Save directly to Supabase
+    const { error: dbError } = await supabaseAdmin
       .from('settings')
-      .upsert(
-        {
-          user_email: userEmail,
-          stripe_account_id: stripeAccountId,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'stripe_account_id' } 
-      );
+      .insert({
+        user_email: userEmail,
+        stripe_account_id: stripeAccountId,
+        business_name: businessName
+      });
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      console.error("Database Insert Error:", dbError);
+      throw new Error("Failed to save to database");
+    }
 
-    // Send them back to the edit page with a success flag
-    return NextResponse.redirect(new URL('/dashboard/edit?success=stripe_connected', request.url));
+    // 4. Send them back to the dashboard. It will instantly show the new business!
+    return NextResponse.redirect(new URL('/dashboard?success=true', request.url));
 
-  } catch (error) {
-    console.error('Stripe OAuth Error:', error);
-    return NextResponse.redirect(new URL('/dashboard/edit?error=oauth_failed', request.url));
+  } catch (err) {
+    console.error("Stripe Callback Error:", err);
+    return NextResponse.redirect(new URL('/dashboard?error=setup_failed', request.url));
   }
 }
