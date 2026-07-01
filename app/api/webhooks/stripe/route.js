@@ -6,7 +6,7 @@ import { createClient } from '@supabase/supabase-js'
 
 // Initialize Stripe to fetch the connected account's business name
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2023-10-16', 
+  apiVersion: '2026-05-27.dahlia', 
 });
 
 // Initialize Supabase Admin client for secure backend operations (bypasses RLS safely)
