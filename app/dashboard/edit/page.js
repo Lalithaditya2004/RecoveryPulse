@@ -9,7 +9,7 @@ export default function EditConfig() {
   const [loadingPage, setLoadingPage] = useState(true);
   const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [status, setStatus] = useState({ type: "", message: "" });
-  const [tierInfo, setTierInfo] = useState({ tier: 'basic', count: 0, limit: 1 });
+  const [tierInfo, setTierInfo] = useState({ tier: 'basic', count: 0, limit: 7 });
   
   const [formData, setFormData] = useState({
     businessName: "",
@@ -34,22 +34,32 @@ export default function EditConfig() {
       }
       setUser(session.user);
       
+      // 1. Fetch Profile & Subscription Status
       const { data: profile } = await supabase
         .from('profiles')
-        .select('subscription_tier')
+        .select('subscription_tier, subscription_status')
         .eq('user_email', session.user.email)
-        .maybeSingle();
+        .single();
 
-      const userTier = profile?.subscription_tier?.toLowerCase() || 'basic';
-      const userLimit = TIER_LIMITS[userTier] || 1;
-
+      // 2. Fetch current business count
       const { count: currentCount } = await supabase
         .from('settings')
         .select('*', { count: 'exact', head: true })
         .eq('user_email', session.user.email);
 
+      // 3. SECURITY GUARD: Redirect if not active OR limit reached
+      const userTier = profile?.subscription_tier?.toLowerCase() || 'basic';
+      const isActive = profile?.subscription_status === 'active';
+      const userLimit = TIER_LIMITS[userTier] || 7;
+
+      if (!isActive || currentCount >= userLimit) {
+        window.location.href = "/dashboard";
+        return;
+      }
+
       setTierInfo({ tier: userTier, count: currentCount || 0, limit: userLimit });
 
+      // 4. Fetch existing business data
       const { data } = await supabase
         .from("settings")
         .select("*")
@@ -69,14 +79,6 @@ export default function EditConfig() {
   }, []);
 
   const handleStripeConnect = () => {
-    if (tierInfo.count >= tierInfo.limit) {
-      setStatus({ 
-        type: "error", 
-        message: `Limit Reached: You can only connect ${tierInfo.limit} business(es) on the ${tierInfo.tier} plan.` 
-      });
-      return;
-    }
-
     const clientId = process.env.NEXT_PUBLIC_STRIPE_CLIENT_ID; 
     const redirectUri = `${window.location.origin}/api/auth/stripe/callback`;
     const state = encodeURIComponent(user.email);
@@ -136,7 +138,6 @@ export default function EditConfig() {
           </div>
         </div>
 
-        {/* The unified form */}
         <form onSubmit={handleSaveName} className="space-y-6">
           <div>
             <label className="block text-sm font-semibold text-slate-700">Internal Business Name</label>
@@ -171,7 +172,6 @@ export default function EditConfig() {
             </div>
           )}
         </form>
-
       </div>
     </div>
   );
