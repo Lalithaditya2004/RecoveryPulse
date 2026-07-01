@@ -54,11 +54,7 @@ export default function Navbar() {
                   Sign out
                 </button>
               </>
-            ) : (
-              <Link href="/" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
-                Sign In
-              </Link>
-            )}
+            ) : null}
           </div>
           
         </div>
