@@ -6,205 +6,271 @@ import { createClient } from '@supabase/supabase-js'
 
 // Initialize Stripe to fetch the connected account's business name
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: '2026-05-27.dahlia', 
-});
+  apiVersion: '2026-05-27.dahlia',
+})
 
 // Initialize Supabase Admin client for secure backend operations (bypasses RLS safely)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY 
-);
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+)
+
+function logWebhook(stage, details) {
+  console.log(`[StripeWebhook] ${stage}`, details)
+}
 
 export async function POST(request) {
-  // Elevate these variables so the catch block can log them even if the process fails midway
-  let stripeEventId = null;
-  let founderEmail = null;
-  let customerEmail = null;
-  let rawAmount = null;
-  let companyName = null;
+  let stripeEventId = null
+  let founderEmail = null
+  let customerEmail = null
+  let rawAmount = null
+  let companyName = null
+  let connectedAccountId = null
+  let eventType = null
 
   try {
-    const body = await request.text(); // Get raw body as text
-    const sig = request.headers.get('stripe-signature');
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    const body = await request.text()
+    const sig = request.headers.get('stripe-signature')
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
 
-    let event;
+    logWebhook('request-started', {
+      hasSignature: Boolean(sig),
+      hasWebhookSecret: Boolean(webhookSecret),
+      bodyLength: body?.length || 0,
+      contentType: request.headers.get('content-type'),
+    })
 
-    try {
-      // Verify webhook signature
-      event = stripe.webhooks.constructEvent(body, sig, webhookSecret);
-    } catch (err) {
-      console.error(`Webhook signature verification failed: ${err.message}`);
-      return NextResponse.json({ error: 'Webhook Error' }, { status: 400 });
+    if (!body) {
+      throw new Error('Empty request body received')
     }
 
-    // Now safely parse the JSON
-    const parsedBody = JSON.parse(body);
+    let event
+    let parsedBody
 
-    // 1. Identify the Connected Account via Stripe Connect payload
-    const connectedAccountId = parsedBody.account
-    console.log(`Received Stripe webhook for connected account: ${connectedAccountId}`)
-    
+    try {
+      parsedBody = JSON.parse(body)
+      event = stripe.webhooks.constructEvent(body, sig, webhookSecret)
+    } catch (err) {
+      logWebhook('signature-or-parse-failed', {
+        error: err.message,
+        stack: err.stack,
+      })
+      return NextResponse.json({ error: 'Webhook Error' }, { status: 400 })
+    }
+
+    stripeEventId = parsedBody.id || event?.id || null
+    eventType = parsedBody.type || event?.type || null
+    connectedAccountId = parsedBody.account || null
+
+    logWebhook('event-received', {
+      stripeEventId,
+      eventType,
+      connectedAccountId,
+      hasObject: Boolean(parsedBody.data?.object),
+    })
+
     if (!connectedAccountId) {
-      console.log("No connected account ID found. Ignored platform-level event.")
+      logWebhook('ignoring-platform-event', { stripeEventId, eventType })
       return NextResponse.json(
         { received: true, note: 'Ignored platform-level event' },
         { status: 200 }
       )
     }
 
-    stripeEventId = body.id
-    const eventType = body.type
-
     if (eventType !== 'invoice.payment_failed') {
-      return NextResponse.json({ received: true }, { status: 200 })
+      logWebhook('ignoring-unhandled-event', {
+        stripeEventId,
+        eventType,
+        connectedAccountId,
+      })
+      return NextResponse.json({ received: true, note: `Ignored event type: ${eventType}` }, { status: 200 })
     }
 
-    // 2. Prevent Duplicates (Using supabaseAdmin)
-    const { data: duplicate } = await supabaseAdmin
+    const paymentObject = parsedBody.data?.object || {}
+    customerEmail = paymentObject.customer_email || null
+    const customerName = paymentObject.customer_name || 'there'
+    const recoveryLink = paymentObject.hosted_invoice_url || null
+
+    rawAmount = paymentObject.amount_due ? paymentObject.amount_due / 100 : null
+    const currency = paymentObject.currency?.toUpperCase() || ''
+    const formattedAmount = rawAmount !== null ? `${rawAmount.toFixed(2)} ${currency}`.trim() : ''
+    const stripeCustomerId = paymentObject.customer
+
+    logWebhook('payment-payload', {
+      stripeEventId,
+      connectedAccountId,
+      customerEmail,
+      customerName,
+      stripeCustomerId,
+      formattedAmount,
+      recoveryLink: recoveryLink ? 'present' : 'missing',
+      eventType,
+    })
+
+    const { data: duplicate, error: duplicateError } = await supabaseAdmin
       .from('payment_events')
       .select('id')
       .eq('stripe_event_id', stripeEventId)
       .maybeSingle()
 
+    if (duplicateError) {
+      throw new Error(`Duplicate check failed: ${duplicateError.message}`)
+    }
+
+    logWebhook('duplicate-check', { stripeEventId, duplicateFound: Boolean(duplicate) })
+
     if (duplicate) {
+      logWebhook('duplicate-event-ignored', { stripeEventId })
       return NextResponse.json({ duplicate: true }, { status: 200 })
     }
 
-    // 3. Extract Dynamic Payload Data (Populate elevated variables)
-    customerEmail = body.data.object.customer_email
-    const customerName = body.data.object.customer_name || 'there'
-    
-    const recoveryLink = body.data.object.hosted_invoice_url; 
-    
-    rawAmount = body.data.object.amount_due / 100
-    const currency = body.data.object.currency?.toUpperCase() || ''
-    const formattedAmount = `${rawAmount.toFixed(2)} ${currency}`.trim()
-
-    const stripeCustomerId = body.data.object.customer
-
-    // 4. Look up Client Settings using the Stripe Account ID
     const { data: founderSettings, error: settingsError } = await supabaseAdmin
       .from('settings')
       .select('*')
       .eq('stripe_account_id', connectedAccountId)
-      .maybeSingle() // Changed from single() to avoid throwing errors on empty results
+      .maybeSingle()
 
     if (settingsError) {
       throw new Error(`Database error fetching config: ${settingsError.message}`)
     }
 
-    // GRACEFUL EXIT: If the setting was deleted by the user, stop here.
+    logWebhook('settings-lookup', {
+      connectedAccountId,
+      settingsFound: Boolean(founderSettings),
+      founderEmail: founderSettings?.user_email || null,
+    })
+
     if (!founderSettings) {
-      console.log(`Config missing for ${connectedAccountId}. Business was likely removed. Ignoring.`);
+      logWebhook('config-missing', { connectedAccountId })
       return NextResponse.json(
-        { received: true, note: 'Business disconnected, webhook ignored' }, 
-        { status: 200 } // Return 200 so Stripe doesn't retry
-      );
+        { received: true, note: 'Business disconnected, webhook ignored' },
+        { status: 200 }
+      )
     }
 
-    founderEmail = founderSettings.user_email;
+    founderEmail = founderSettings.user_email
 
-    // 5. Check Subscription Status
-    const { data: founderProfile } = await supabaseAdmin
+    const { data: founderProfile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('subscription_status')
       .eq('user_email', founderEmail)
-      .single();
+      .single()
 
-    if (!founderProfile || founderProfile.subscription_status !== 'active') {
-      console.log(`User ${founderEmail} is not active. Ignoring payment failure.`);
-      return NextResponse.json(
-        { received: true, note: 'Subscription inactive, webhook ignored' }, 
-        { status: 200 }
-      );
+    if (profileError) {
+      throw new Error(`Profile lookup failed: ${profileError.message}`)
     }
 
-    // Fetch the actual Business Name
-    const connectedAccountDetails = await stripe.accounts.retrieve(connectedAccountId);
-    companyName = connectedAccountDetails.business_profile?.name || 'our company';
-
-    // 6. Get Phone Number using Stripe Connect Authorization
-    let customerPhone = await getCustomerPhone({
-      stripeAccountId: connectedAccountId,
-      customerId: stripeCustomerId
+    logWebhook('profile-status', {
+      founderEmail,
+      subscriptionStatus: founderProfile?.subscription_status || null,
     })
 
-    // Graceful Failure: If no phone is found, log as failed and do not retry
-    if (!customerPhone) {
-      console.log(`No phone number found for ${customerEmail}. Marking event as failed.`);
-      
-      await supabaseAdmin
-        .from('payment_events')
-        .insert({
-          stripe_event_id: stripeEventId,
-          founder_email: founderEmail,
-          customer_email: customerEmail,
-          amount_due: rawAmount,
-          business_name: companyName,
-          status: 'failed' 
-        });
-
-      // Return 200 so Stripe knows we handled it and doesn't retry
-      return NextResponse.json({ success: true, note: 'No phone number, logged as failed' }, { status: 200 });
+    if (!founderProfile || founderProfile.subscription_status !== 'active') {
+      logWebhook('subscription-inactive', {
+        founderEmail,
+        subscriptionStatus: founderProfile?.subscription_status || null,
+      })
+      return NextResponse.json(
+        { received: true, note: 'Subscription inactive, webhook ignored' },
+        { status: 200 }
+      )
     }
 
-    console.log(`Preparing to send WhatsApp to ${customerPhone} for ${customerEmail}`) 
+    const connectedAccountDetails = await stripe.accounts.retrieve(connectedAccountId)
+    companyName = connectedAccountDetails.business_profile?.name || 'our company'
 
-    // 7. Fire the centralized WhatsApp message
-    await sendRecoveryMessage({
-      customerPhone,
-      customerName,
-      companyName,      
-      amount: formattedAmount,
-      recoveryLink,
-    });
-    
-    console.log(`WhatsApp message sent successfully to ${customerPhone}`)
-    
-    // 8. Log Success Event
-    const { error: insertError } = await supabaseAdmin
-      .from('payment_events')
-      .insert({
+    logWebhook('stripe-account-details', { connectedAccountId, companyName })
+
+    let customerPhone = await getCustomerPhone({
+      stripeAccountId: connectedAccountId,
+      customerId: stripeCustomerId,
+    })
+
+    logWebhook('customer-phone-lookup', {
+      connectedAccountId,
+      stripeCustomerId,
+      customerPhone: customerPhone ? 'found' : 'missing',
+    })
+
+    if (!customerPhone) {
+      logWebhook('no-phone-found', { stripeEventId, customerEmail })
+
+      await supabaseAdmin.from('payment_events').insert({
         stripe_event_id: stripeEventId,
         founder_email: founderEmail,
         customer_email: customerEmail,
         amount_due: rawAmount,
         business_name: companyName,
-        status: 'whatsapp_sent'
+        status: 'failed',
       })
 
+      return NextResponse.json({ success: true, note: 'No phone number, logged as failed' }, { status: 200 })
+    }
+
+    logWebhook('sending-whatsapp', {
+      stripeEventId,
+      customerPhone,
+      customerEmail,
+      companyName,
+      amount: formattedAmount,
+    })
+
+    await sendRecoveryMessage({
+      customerPhone,
+      customerName,
+      companyName,
+      amount: formattedAmount,
+      recoveryLink,
+    })
+
+    logWebhook('whatsapp-sent', { stripeEventId, customerPhone })
+
+    const { error: insertError } = await supabaseAdmin.from('payment_events').insert({
+      stripe_event_id: stripeEventId,
+      founder_email: founderEmail,
+      customer_email: customerEmail,
+      amount_due: rawAmount,
+      business_name: companyName,
+      status: 'whatsapp_sent',
+    })
+
     if (insertError) {
-      console.error("Supabase Insert Error:", insertError);
-      throw new Error(`Database insert failed: ${insertError.message}`);
+      console.error('Supabase Insert Error:', insertError)
+      throw new Error(`Database insert failed: ${insertError.message}`)
     }
 
     return NextResponse.json({ success: true }, { status: 200 })
+  } catch (error) {
+    logWebhook('webhook-failed', {
+      message: error.message,
+      stack: error.stack,
+      stripeEventId,
+      founderEmail,
+      customerEmail,
+      rawAmount,
+      companyName,
+    })
 
-  } catch(error) {
-    console.error("Webhook processing error:", error)
-
-    // Graceful Failure: Log whatever context we managed to collect before the crash
     if (stripeEventId) {
       const { error: upsertError } = await supabaseAdmin
         .from('payment_events')
-        .upsert({
-          stripe_event_id: stripeEventId,
-          founder_email: founderEmail || null,
-          customer_email: customerEmail || 'Unknown',
-          amount_due: rawAmount || 0,
-          business_name: companyName || 'Unknown',
-          status: 'failed'
-        }, { onConflict: 'stripe_event_id' })
-        
+        .upsert(
+          {
+            stripe_event_id: stripeEventId,
+            founder_email: founderEmail || null,
+            customer_email: customerEmail || 'Unknown',
+            amount_due: rawAmount || 0,
+            business_name: companyName || 'Unknown',
+            status: 'failed',
+          },
+          { onConflict: 'stripe_event_id' }
+        )
+
       if (upsertError) {
-        console.error("CRITICAL: Could not even log the failure to Supabase:", upsertError);
+        console.error('CRITICAL: Could not even log the failure to Supabase:', upsertError)
       }
     }
 
-    return NextResponse.json(
-      { error: error.message },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }
