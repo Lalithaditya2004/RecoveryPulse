@@ -73,10 +73,19 @@ export async function POST(request) {
       .from('settings')
       .select('*')
       .eq('stripe_account_id', connectedAccountId)
-      .single()
+      .maybeSingle() // Changed from single() to avoid throwing errors on empty results
 
-    if (settingsError || !founderSettings) {
-      throw new Error(`Config missing for Stripe account: ${connectedAccountId}`)
+    if (settingsError) {
+      throw new Error(`Database error fetching config: ${settingsError.message}`)
+    }
+
+    // GRACEFUL EXIT: If the setting was deleted by the user, stop here.
+    if (!founderSettings) {
+      console.log(`Config missing for ${connectedAccountId}. Business was likely removed. Ignoring.`);
+      return NextResponse.json(
+        { received: true, note: 'Business disconnected, webhook ignored' }, 
+        { status: 200 } // Return 200 so Stripe doesn't retry
+      );
     }
 
     founderEmail = founderSettings.user_email;
