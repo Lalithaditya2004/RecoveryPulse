@@ -5,7 +5,7 @@ import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
 // Initialize Stripe to fetch the connected account's business name
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+const stripe = new Stripe(process.env.NEXT_PUBLIC_STRIPE_SECRET_KEY, {
   apiVersion: '2026-05-27.dahlia',
 })
 
@@ -31,7 +31,7 @@ export async function POST(request) {
   try {
     const body = await request.text()
     const sig = request.headers.get('stripe-signature')
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET
+    const webhookSecret = process.env.NEXT_PUBLIC_STRIPE_WEBHOOK_SECRET
 
     logWebhook('request-started', {
       hasSignature: Boolean(sig),
