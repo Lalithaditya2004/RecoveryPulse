@@ -1,0 +1,11 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "recovery-pulse"
+compatibility_date = "2026-07-02"
+compatibility_flags = [ "nodejs_compat" ]
+pages_build_output_dir = ".next"
+
+# This is where your service bindings live. 
+# Make sure the service name matches your actual dashboard app name!
+[[services]]
+binding = "WORKER_SELF_REFERENCE"
+service = "recovery-pulse"
