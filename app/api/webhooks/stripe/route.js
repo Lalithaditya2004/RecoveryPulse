@@ -1,3 +1,4 @@
+export const runtime = 'edge';
 import { NextResponse } from 'next/server'
 import { getCustomerPhone } from '@/lib/stripe'
 import { sendRecoveryMessage } from '@/lib/whatsapp'
