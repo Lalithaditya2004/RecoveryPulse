@@ -8,8 +8,11 @@ export default function Dashboard() {
   const [configs, setConfigs] = useState([]);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false); // NEW STATE
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [tierInfo, setTierInfo] = useState({ tier: 'none', limit: 0, isActive: false });
+  
+  // NEW STATE: Tracks which event's error details are currently being viewed
+  const [selectedErrorEvent, setSelectedErrorEvent] = useState(null);
 
   const [page, setPage] = useState(0);
   const [hasMoreEvents, setHasMoreEvents] = useState(false);
@@ -74,14 +77,12 @@ export default function Dashboard() {
     fetchDashboardData();
   }, []);
 
-  // NEW: Refresh Handler
   const handleRefresh = async () => {
     if (!user) return;
     setIsRefreshing(true);
-    // Reset to page 0 on refresh to get newest data
     setPage(0);
     await fetchHistoryEvents(user.email, 0);
-    setTimeout(() => setIsRefreshing(false), 500); // Small delay for visual feedback
+    setTimeout(() => setIsRefreshing(false), 500); 
   };
 
   const handleNextPage = () => {
@@ -150,9 +151,10 @@ export default function Dashboard() {
   if (loading) return <div className="p-12 text-center text-slate-500">Loading dashboard...</div>;
 
   return (
-    <div className="py-12 px-4">
+    <div className="py-12 px-4 relative">
       <div className="max-w-6xl mx-auto space-y-12">
         
+        {/* --- Top Section: Businesses --- */}
         <section>
           <div className="flex items-center justify-between mb-8">
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Your Businesses</h1>
@@ -232,12 +234,12 @@ export default function Dashboard() {
           )}
         </section>
 
+        {/* --- Bottom Section: Recovery History --- */}
         <section>
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-center gap-4">
               <h2 className="text-xl font-bold text-slate-900">Recovery History (Last 30 Days)</h2>
               
-              {/* NEW: Refresh Button */}
               <button 
                 onClick={handleRefresh}
                 disabled={isRefreshing}
@@ -280,21 +282,20 @@ export default function Dashboard() {
                           <td className="px-6 py-4 text-slate-600">{evt.customer_email}</td>
                           <td className="px-6 py-4 text-slate-600">${evt.amount_due?.toFixed(2)}</td>
                           <td className="px-6 py-4">
-                            <div className="flex flex-col gap-1 items-start">
-                              <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                                evt.status === 'whatsapp_sent' || evt.status === 'success'
-                                  ? 'bg-emerald-100 text-emerald-800'
-                                  : 'bg-rose-100 text-rose-800'
-                              }`}>
-                                {evt.status === 'whatsapp_sent' ? 'Message Sent' : 'Failed'}
+                            {/* REPLACED: Clickable Error Badge */}
+                            {evt.status === 'whatsapp_sent' || evt.status === 'success' ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                Message Sent
                               </span>
-                              {/* NEW: Display Failure Reason */}
-                              {evt.status === 'failed' && evt.failure_reason && (
-                                <span className="text-[10px] text-rose-600 font-medium truncate max-w-[200px]" title={evt.failure_reason}>
-                                  {evt.failure_reason}
-                                </span>
-                              )}
-                            </div>
+                            ) : (
+                              <button 
+                                onClick={() => setSelectedErrorEvent(evt)}
+                                className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-rose-100 text-rose-800 hover:bg-rose-200 transition-colors underline decoration-rose-300 underline-offset-2"
+                                title="Click to view error details"
+                              >
+                                Failed ⓘ
+                              </button>
+                            )}
                           </td>
                           <td className="px-6 py-4 text-slate-500">
                             {new Date(evt.created_at).toLocaleDateString()}
@@ -320,8 +321,69 @@ export default function Dashboard() {
             )}
           </div>
         </section>
-
       </div>
+
+      {/* --- NEW: Error Details Modal --- */}
+      {selectedErrorEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all">
+            
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                <span className="text-rose-600">⚠️</span> Delivery Failure
+              </h3>
+              <button 
+                onClick={() => setSelectedErrorEvent(null)} 
+                className="text-slate-400 hover:text-slate-700 transition-colors p-1"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6">
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Customer Email</p>
+                  <p className="text-sm font-medium text-slate-800 truncate">{selectedErrorEvent.customer_email}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Business</p>
+                  <p className="text-sm font-medium text-slate-800 truncate">{selectedErrorEvent.business_name || 'N/A'}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Error Reason</p>
+                <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl text-sm text-rose-700 font-mono whitespace-pre-wrap break-words">
+                  {selectedErrorEvent.failure_reason || "Unknown error. Contact support for more details."}
+                </div>
+                {selectedErrorEvent.failure_reason?.includes('No phone number') && (
+                  <p className="text-xs text-slate-500 mt-2 flex items-start gap-1">
+                    <span className="text-amber-500 font-bold">💡 Tip:</span> 
+                    The customer did not provide a phone number during checkout on Stripe. Ensure phone number collection is required in your Stripe payment links.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+              <button 
+                onClick={() => setSelectedErrorEvent(null)} 
+                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+              >
+                Close Details
+              </button>
+            </div>
+            
+          </div>
+        </div>
+      )}
     </div>
   );
 }
