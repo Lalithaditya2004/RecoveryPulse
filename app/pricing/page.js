@@ -18,7 +18,7 @@ export default function Pricing() {
 
   // Helper to append user data to Lemon Squeezy checkout links
   const getCheckoutLink = (baseLink) => {
-    if (!user) return "/signup"; // Redirect to login if they aren't logged in
+    if (!user) return "/"; // Redirect to login if they aren't logged in
     
     // Lemon Squeezy allows passing custom data like this:
     // ?checkout[email]=user@email.com&checkout[custom][user_email]=user@email.com
@@ -31,10 +31,10 @@ export default function Pricing() {
     You get these from the Lemon Squeezy Dashboard -> Products -> Share Button
   */
   const LEMON_SQUEEZY_LINKS = {
-    basic_monthly: "https://your-store.lemonsqueezy.com/checkout/buy/VARIANT_ID_1",
-    basic_yearly: "https://your-store.lemonsqueezy.com/checkout/buy/VARIANT_ID_2",
-    pro_monthly: "https://your-store.lemonsqueezy.com/checkout/buy/VARIANT_ID_3",
-    pro_yearly: "https://your-store.lemonsqueezy.com/checkout/buy/VARIANT_ID_4",
+    basic_monthly: "https://recovery-pulse.lemonsqueezy.com/checkout/buy/9d798fc7-c94a-4367-b7e1-e4cac2b3c90e",
+    basic_yearly: "https://recovery-pulse.lemonsqueezy.com/checkout/buy/5e154780-47ef-4bf1-94d9-0e2a4f4104ef",
+    pro_monthly: "https://recovery-pulse.lemonsqueezy.com/checkout/buy/866374dc-3290-42ed-9224-39d8ed114ab3",
+    pro_yearly: "https://recovery-pulse.lemonsqueezy.com/checkout/buy/9ba4d6f9-58bc-40ae-b25d-4d3802d4a500",
   };
 
   return (
