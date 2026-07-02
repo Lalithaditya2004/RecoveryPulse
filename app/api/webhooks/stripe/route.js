@@ -88,7 +88,10 @@ export async function POST(request) {
 
     const paymentObject = parsedBody.data?.object || {}
     customerEmail = paymentObject.customer_email || null
+    
+    // AUTOMATIC FALLBACK: Will use 'there' if name is null
     const customerName = paymentObject.customer_name || 'there'
+    
     const recoveryLink = paymentObject.hosted_invoice_url || null
 
     rawAmount = paymentObject.amount_due ? paymentObject.amount_due / 100 : null
@@ -192,6 +195,7 @@ export async function POST(request) {
       customerPhone: customerPhone ? 'found' : 'missing',
     })
 
+    // FAILURE 1: NO PHONE NUMBER FOUND
     if (!customerPhone) {
       logWebhook('no-phone-found', { stripeEventId, customerEmail })
 
@@ -202,6 +206,7 @@ export async function POST(request) {
         amount_due: rawAmount,
         business_name: companyName,
         status: 'failed',
+        failure_reason: 'No phone number found in Stripe'
       })
 
       return NextResponse.json({ success: true, note: 'No phone number, logged as failed' }, { status: 200 })
@@ -215,16 +220,33 @@ export async function POST(request) {
       amount: formattedAmount,
     })
 
-    await sendRecoveryMessage({
-      customerPhone,
-      customerName,
-      companyName,
-      amount: formattedAmount,
-      recoveryLink,
-    })
+    // Attempt to send WhatsApp
+    try {
+      await sendRecoveryMessage({
+        customerPhone,
+        customerName,
+        companyName,
+        amount: formattedAmount,
+        recoveryLink,
+      })
+    } catch (waError) {
+      // FAILURE 2: WHATSAPP REJECTED (e.g., number not registered on WhatsApp)
+      logWebhook('whatsapp-failed', { error: waError.message })
+      await supabaseAdmin.from('payment_events').insert({
+        stripe_event_id: stripeEventId,
+        founder_email: founderEmail,
+        customer_email: customerEmail,
+        amount_due: rawAmount,
+        business_name: companyName,
+        status: 'failed',
+        failure_reason: `WhatsApp Error: ${waError.message}`
+      })
+      return NextResponse.json({ success: true, note: 'Logged as failed (WhatsApp rejected)' }, { status: 200 })
+    }
 
     logWebhook('whatsapp-sent', { stripeEventId, customerPhone })
 
+    // SUCCESS
     const { error: insertError } = await supabaseAdmin.from('payment_events').insert({
       stripe_event_id: stripeEventId,
       founder_email: founderEmail,
@@ -232,6 +254,7 @@ export async function POST(request) {
       amount_due: rawAmount,
       business_name: companyName,
       status: 'whatsapp_sent',
+      failure_reason: null
     })
 
     if (insertError) {
@@ -251,6 +274,7 @@ export async function POST(request) {
       companyName,
     })
 
+    // FAILURE 3: CRITICAL INTERNAL ERROR
     if (stripeEventId) {
       const { error: upsertError } = await supabaseAdmin
         .from('payment_events')
@@ -262,6 +286,7 @@ export async function POST(request) {
             amount_due: rawAmount || 0,
             business_name: companyName || 'Unknown',
             status: 'failed',
+            failure_reason: `Internal Error: ${error.message}`
           },
           { onConflict: 'stripe_event_id' }
         )

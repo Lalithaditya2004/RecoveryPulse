@@ -58,7 +58,7 @@ export default function LandingPage() {
           </h1>
           <p className="text-lg text-slate-600 max-w-xl mx-auto leading-relaxed">
             RecoveryPulse connects your Stripe account directly to WhatsApp. 
-            Instantly send personalized recovery links the second a charge declines.
+            Instantly send recovery links the second a charge/auto-pay declines.
           </p>
         </div>
 
